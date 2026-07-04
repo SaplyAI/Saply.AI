@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function App() {
   // Navigation steps: 'LANDING' -> 'CONFIG' -> 'INTERVIEW' -> 'END'
@@ -11,6 +11,68 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState([]); // Array of { role: 'assistant'|'user', content: string }
   const [userInput, setUserInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recognitionRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setVoiceSupported(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map((result) => result[0].transcript)
+        .join(' ')
+        .trim();
+
+      if (transcript) {
+        setUserInput((prev) => (prev ? `${prev} ${transcript}`.trim() : transcript));
+      }
+      setIsListening(false);
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    setVoiceSupported(true);
+
+    return () => {
+      recognition.stop();
+    };
+  }, []);
+
+  const handleVoiceToggle = () => {
+    if (!recognitionRef.current) return;
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      recognitionRef.current.start();
+      setIsListening(true);
+    } catch {
+      setIsListening(false);
+    }
+  };
 
   // Endpoint 1: Triggers the backend initialization
   const handleStartInterview = async () => {
@@ -188,22 +250,40 @@ export default function App() {
             </div>
 
             {/* Answer Input Submission */}
-            <form onSubmit={handleSendAnswer} className="flex gap-2 mb-3">
-              <input 
-                type="text"
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                placeholder="Type your response here..."
-                className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500"
-                disabled={loading}
-              />
-              <button 
-                type="submit" 
-                disabled={loading || !userInput.trim()} 
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:opacity-50 rounded-lg text-sm font-medium transition"
-              >
-                Submit
-              </button>
+            <form onSubmit={handleSendAnswer} className="flex flex-col gap-2 mb-3">
+              <div className="flex gap-2">
+                <input 
+                  type="text"
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  placeholder="Type your response here..."
+                  className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500"
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={handleVoiceToggle}
+                  disabled={loading || !voiceSupported}
+                  className={`px-3 py-2.5 rounded-lg text-sm font-medium transition ${
+                    isListening
+                      ? 'bg-rose-600 hover:bg-rose-500'
+                      : 'bg-slate-700 hover:bg-slate-600'
+                  } disabled:opacity-50`}
+                  title={voiceSupported ? 'Speak your answer' : 'Voice input not supported in this browser'}
+                >
+                  {isListening ? 'Stop' : '🎤'}
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={loading || !userInput.trim()} 
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:opacity-50 rounded-lg text-sm font-medium transition"
+                >
+                  Submit
+                </button>
+              </div>
+              {!voiceSupported && (
+                <p className="text-[11px] text-slate-500">Voice input works best in Chrome or Edge browsers.</p>
+              )}
             </form>
 
             <button 

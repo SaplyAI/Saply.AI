@@ -25,7 +25,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY")) if os.environ.get("GROQ_API_KEY") else None
+
+
+def build_fallback_question(interview_type: str, role: str, resume_text: str = "") -> str:
+    if interview_type == "hr":
+        return "Tell me about a time you worked with a team through a difficult situation and how you handled it."
+    if resume_text:
+        return f"Based on your resume, walk me through one project you are most proud of and explain your contribution."
+    return f"Tell me about a recent project or coursework experience relevant to an entry-level {role} role."
 
 class Message(BaseModel):
     role: str      # "assistant" (the AI) or "user" (the candidate)
@@ -81,18 +89,21 @@ async def start_interview(
         else:
             system_prompt += f" Start with a standard, approachable opening technical question or project walkthrough relevant to a 4th-year {role} applicant."
 
-    try:
-        completion = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Hello, I am ready to begin the interview."}
-            ],
-            temperature=0.6
-        )
-        first_question = completion.choices[0].message.content
-    except Exception as e:
-        first_question = f"Error generating opening question: {str(e)}"
+    if groq_client is None:
+        first_question = build_fallback_question(interview_type, role, resume_text)
+    else:
+        try:
+            completion = groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Hello, I am ready to begin the interview."}
+                ],
+                temperature=0.6
+            )
+            first_question = completion.choices[0].message.content
+        except Exception as e:
+            first_question = f"Error generating opening question: {str(e)}"
 
     return {
         "success": True,
@@ -126,15 +137,18 @@ async def next_question(payload: ChatRequest):
     for msg in payload.chat_history:
         messages.append({"role": msg.role, "content": msg.content})
         
-    try:
-        completion = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=messages,
-            temperature=0.5
-        )
-        next_q = completion.choices[0].message.content
-    except Exception as e:
-        next_q = f"Error generating next question: {str(e)}"
+    if groq_client is None:
+        next_q = build_fallback_question(payload.interview_type, payload.role)
+    else:
+        try:
+            completion = groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=messages,
+                temperature=0.5
+            )
+            next_q = completion.choices[0].message.content
+        except Exception as e:
+            next_q = f"Error generating next question: {str(e)}"
         
     return {
         "success": True,
